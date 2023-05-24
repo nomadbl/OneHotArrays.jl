@@ -2,7 +2,7 @@
     OneHotArray{T, N, M, I} <: AbstractArray{Bool, M}
     OneHotArray(indices, L)
 
-A one-hot `M`-dimensional array with `L` labels (i.e. `size(A, 1) == L` and `sum(A, dims=1) == 1`)
+A one-hot `M`-dimensional array with `L` labels on the specified `axis` (i.e. `size(A, axis) == L` and `sum(A, dims=axis) == 1`)
 stored as a compact `N == M-1`-dimensional array of indices.
 
 Typically constructed by [`onehot`](@ref) and [`onehotbatch`](@ref).
@@ -11,10 +11,11 @@ Parameter `I` is the type of the underlying storage, and `T` its eltype.
 struct OneHotArray{T<:Integer, N, var"N+1", I<:Union{T, AbstractArray{T, N}}} <: AbstractArray{Bool, var"N+1"}
   indices::I
   nlabels::Int
+  axis::Int
 end
-OneHotArray{T, N, I}(indices, L::Int) where {T, N, I} = OneHotArray{T, N, N+1, I}(indices, L)
-OneHotArray(indices::T, L::Int) where {T<:Integer} = OneHotArray{T, 0, 1, T}(indices, L)
-OneHotArray(indices::I, L::Int) where {T, N, I<:AbstractArray{T, N}} = OneHotArray{T, N, N+1, I}(indices, L)
+OneHotArray{T,N,I}(indices, L::Int, axis::Int=1) where {T,N,I} = OneHotArray{T,N,N + 1,I}(indices, L, axis)
+OneHotArray(indices::T, L::Int, axis::Int=1) where {T<:Integer} = OneHotArray{T,0,1,T}(indices, L, axis)
+OneHotArray(indices::I, L::Int, axis::Int=1) where {T,N,I<:AbstractArray{T,N}} = OneHotArray{T,N,N + 1,I}(indices, L, axis)
 
 _indices(x::OneHotArray) = x.indices
 _indices(x::Base.ReshapedArray{<:Any, <:Any, <:OneHotArray}) =
@@ -47,24 +48,27 @@ const OneHotLike{T, N, var"N+1", I} =
         Base.ReshapedArray{Bool, var"N+1", <:OneHotArray{T, <:Any, <:Any, I}}}
 
 _isonehot(x::OneHotArray) = true
-_isonehot(x::Base.ReshapedArray{<:Any, <:Any, <:OneHotArray}) = (size(x, 1) == parent(x).nlabels)
+_isonehot(x::Base.ReshapedArray{<:Any,<:Any,<:OneHotArray}) = (size(x, parent(x).axis) == parent(x).nlabels)
 
-_check_nlabels(L, xs::OneHotLike...) = all(size.(xs, 1) .== L)
+_check_nlabels(L, xs::OneHotLike...) = all(size.(xs, xs.axis) .== L)
 
-_nlabels(x::OneHotArray) = size(x, 1)
+_nlabels(x::OneHotArray) = size(x, x.axis)
 function _nlabels(x::OneHotLike, xs::OneHotLike...)
-  L = size(x, 1)
+  L = size(x, x.axis)
   _check_nlabels(L, xs...) ||
     throw(DimensionMismatch("The number of labels are not the same for all one-hot arrays."))
 
   return L
 end
 
-Base.size(x::OneHotArray) = (x.nlabels, size(x.indices)...)
+Base.size(x::OneHotArray) = Tuple(insert!(collect(size(x.indices)), x.axis, x.nlabels))
 
-function Base.getindex(x::OneHotArray{<:Any, N}, i::Int, I::Vararg{Int, N}) where N
-  @boundscheck (1 <= i <= x.nlabels) || throw(BoundsError(x, (i, I...)))
-  return x.indices[I...] .== i
+function Base.getindex(x::OneHotArray, I::Vararg{Int,N}) where {N}
+  length(I) == length(size(x)) || throw(DimensionMismatch("dimensions of OneHotArray $(length(size(x))) and dimensions of indices $(length(I)) do not match."))
+  @boundscheck all(1 .<= I .<= size(x)) || throw(BoundsError(x, I))
+  Ip = collect(I)
+  i = popat!(Ip, x.axis)
+  return x.indices[Ip...] == i
 end
 # the method above is faster on the CPU but will scalar index on the GPU
 # so we define the method below to pass the extra indices directly to GPU array
@@ -78,7 +82,7 @@ function Base.getindex(x::OneHotArray{<:Any, N}, ::Colon, I::Vararg{Any, N}) whe
   return OneHotArray(x.indices[I...], x.nlabels)
 end
 Base.getindex(x::OneHotArray, ::Colon) = BitVector(reshape(x, :))
-Base.getindex(x::OneHotArray{<:Any, N}, ::Colon, ::Vararg{Colon, N}) where N = x
+Base.getindex(x::OneHotArray{<:Any,N}, ::Vararg{Colon,N}) where {N} = x
 
 function Base.showarg(io::IO, x::OneHotArray, toplevel)
   print(io, ndims(x) == 1 ? "OneHotVector(" : ndims(x) == 2 ? "OneHotMatrix(" : "OneHotArray(")
@@ -154,5 +158,5 @@ Base.map(f, x::OneHotLike) = Base.broadcast(f, x)
 
 Base.argmax(x::OneHotLike; dims = Colon()) =
   (_isonehot(x) && dims == 1) ?
-    reshape(CartesianIndex.(_indices(x), CartesianIndices(_indices(x))), 1, size(_indices(x))...) :
+  reshape(CartesianIndex.(_indices(x), CartesianIndices(_indices(x))), 1, size(_indices(x))...) :
     invoke(argmax, Tuple{AbstractArray}, x; dims = dims)

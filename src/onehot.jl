@@ -43,7 +43,7 @@ end
 _findval(val, labels) = findfirst(isequal(val), labels)
 # Fast unrolled method for tuples:
 function _findval(val, labels::Tuple, i::Integer=1)
-  ifelse(isequal(val, first(labels)), i, _findval(val, Base.tail(labels), i+1))
+  ifelse(isequal(val, first(labels)), i, _findval(val, Base.tail(labels), i + 1))
 end
 _findval(val, labels::Tuple{}, i::Integer) = nothing
 
@@ -146,7 +146,7 @@ julia> onecold([ 1  0  0  1  0  1  0  1  0  0  1
 "abeacadabea"
 ```
 """
-function onecold(y::AbstractVector, labels = 1:length(y))
+function onecold(y::AbstractVector, labels=1:length(y))
   nl = length(labels)
   ny = length(y)
   nl == ny || throw(DimensionMismatch("onecold got $nl labels for a vector of length $ny, these must agree"))
@@ -154,17 +154,17 @@ function onecold(y::AbstractVector, labels = 1:length(y))
   ymax isa Number && isnan(ymax) && throw(ArgumentError("maximum value found by onecold is $ymax"))
   labels[i]
 end
-function onecold(y::AbstractArray, labels = 1:size(y, 1))
+function onecold(y::AbstractArray, axis=1, labels=1:size(y, axis))
   nl = length(labels)
-  ny = size(y, 1)
-  nl == ny || throw(DimensionMismatch("onecold got $nl labels for an array with size(y, 1) == $ny, these must agree"))
+  ny = size(y, axis)
+  nl == ny || throw(DimensionMismatch("onecold got $nl labels for an array with size(y, $axis) == $ny, these must agree"))
   indices = _fast_argmax(y)
   xs = isbits(labels) ? indices : collect(indices) # non-bit type cannot be handled by CUDA
 
-  return map(xi -> labels[xi[1]], xs)
+  return map(xi -> labels[xi[axis]], xs)
 end
 
-_fast_argmax(x::AbstractArray) = dropdims(argmax(x; dims = 1); dims = 1)
+_fast_argmax(x::AbstractArray) = dropdims(argmax(x; dims=1); dims=1)
 _fast_argmax(x::OneHotArray) = _indices(x)
 function _fast_argmax(x::OneHotLike)
   if _isonehot(x)
